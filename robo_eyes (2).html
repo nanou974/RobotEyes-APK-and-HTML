@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>RoboEyes</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; width:100vw; height:100vh; overflow:hidden; font-family:monospace; touch-action:manipulation; }
+#eyeCanvas { position:fixed; inset:0; width:100vw; height:100vh; }
+#camVideo  { position:fixed; opacity:0; pointer-events:none; width:1px; height:1px; top:0; left:0; }
+#camCanvas { display:none; }
+#statusLbl { position:fixed; bottom:3.5vh; left:50%; transform:translateX(-50%); font-size:2.4vw; letter-spacing:0.25em; color:rgba(100,220,255,0.35); text-transform:uppercase; pointer-events:none; white-space:nowrap; z-index:10; }
+#memInfo   { position:fixed; bottom:1.5vh; right:3vw; font-size:1.8vw; color:rgba(100,220,255,0.2); pointer-events:none; z-index:10; }
+#bubble    { position:fixed; bottom:10vh; left:5vw; right:5vw; background:rgba(0,14,22,0.93); border:1px solid rgba(100,220,255,0.28); border-radius:14px; padding:12px 16px; color:rgba(180,240,255,0.92); font-size:3.4vw; line-height:1.6; display:none; max-height:22vh; overflow-y:auto; z-index:10; }
+
+/* Boutons bas */
+#micBtn, #dpadBtn, #camBtn {
+  position:fixed; bottom:3.5vh;
+  width:12vw; height:12vw; max-width:52px; max-height:52px;
+  border-radius:50%; font-size:5vw;
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer; z-index:20; background:rgba(0,0,0,0.55);
+  -webkit-tap-highlight-color:transparent;
+}
+#micBtn  { left:50%; transform:translateX(-50%) translateX(-20vw); border:1.5px solid rgba(100,220,255,0.3); color:rgba(100,220,255,0.7); }
+#dpadBtn { left:50%; transform:translateX(-50%); border:1.5px solid rgba(100,220,255,0.2); color:rgba(100,220,255,0.4); font-size:3.5vw; }
+#camBtn  { left:50%; transform:translateX(-50%) translateX(20vw); border:1.5px solid rgba(100,220,255,0.3); color:rgba(100,220,255,0.7); }
+#micBtn.listening { border-color:rgba(0,255,150,0.9); background:rgba(0,255,150,0.1); animation:micPulse 0.8s ease-in-out infinite; }
+#camBtn.active    { border-color:rgba(255,200,60,0.9); background:rgba(255,200,60,0.1); }
+@keyframes micPulse { 0%,100%{box-shadow:0 0 0 0 rgba(0,255,150,0.4);}50%{box-shadow:0 0 0 10px rgba(0,255,150,0);} }
+
+/* Bouton menu */
+#menuBtn { position:fixed; top:2vh; left:3vw; width:8vw; height:8vw; max-width:34px; max-height:34px; background:rgba(0,0,0,0.5); border:1px solid rgba(100,220,255,0.15); border-radius:8px; color:rgba(100,220,255,0.3); font-size:3.5vw; display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:30; -webkit-tap-highlight-color:transparent; }
+
+/* Popup dpad */
+#dpadOverlay { display:none; position:fixed; inset:0; z-index:60; pointer-events:none; }
+#dpadOverlay.open { display:block; }
+#dpadPopup { position:absolute; bottom:14vh; left:50%; transform:translateX(-50%); background:rgba(0,12,22,0.93); border:1.5px solid rgba(100,220,255,0.25); border-radius:18px; padding:14px; pointer-events:all; }
+#dpadHeader { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+#dpadTitle { color:rgba(100,220,255,0.4); font-size:2.4vw; letter-spacing:0.15em; }
+#dpadClose { width:7vw; height:7vw; max-width:30px; max-height:30px; border:1px solid rgba(100,220,255,0.2); border-radius:50%; color:rgba(100,220,255,0.5); font-size:3vw; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+#dpad { display:grid; grid-template-columns:repeat(3,22vw); grid-template-rows:repeat(3,22vw); gap:3vw; max-width:340px; }
+@media(min-width:500px){ #dpad{ grid-template-columns:repeat(3,90px); grid-template-rows:repeat(3,90px); gap:10px; } }
+.dpad-btn { background:rgba(0,20,35,0.85); border:2px solid rgba(100,220,255,0.3); border-radius:14px; font-size:8vw; display:flex; align-items:center; justify-content:center; cursor:pointer; user-select:none; color:rgba(100,220,255,0.9); -webkit-tap-highlight-color:transparent; }
+.dpad-btn:active,.dpad-btn.active { background:rgba(100,220,255,0.15); border-color:rgba(100,220,255,0.7); }
+.dpad-empty { visibility:hidden; }
+
+/* Menu settings */
+#menuOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.82); z-index:40; align-items:center; justify-content:center; }
+#menuOverlay.open { display:flex; }
+#menuPanel { background:#030d16; border:1.5px solid rgba(100,220,255,0.25); border-radius:16px; width:88vw; max-width:400px; padding:18px; display:flex; flex-direction:column; gap:12px; }
+#menuHeader { display:flex; align-items:center; justify-content:space-between; }
+#menuTitle  { color:rgba(100,220,255,0.7); font-size:3.2vw; letter-spacing:0.18em; text-transform:uppercase; }
+#menuClose  { width:9vw; height:9vw; max-width:36px; max-height:36px; border:1.5px solid rgba(100,220,255,0.22); border-radius:50%; color:rgba(100,220,255,0.55); font-size:4vw; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+.menu-sep   { border:none; border-top:1px solid rgba(100,220,255,0.08); }
+.menu-row   { display:flex; align-items:center; gap:2vw; }
+.menu-label { color:rgba(100,220,255,0.4); font-size:2.6vw; white-space:nowrap; letter-spacing:0.1em; }
+#apiKeyInput { flex:1; background:rgba(0,10,20,0.85); border:1.5px solid rgba(100,220,255,0.18); border-radius:8px; padding:7px 10px; color:rgba(100,220,255,0.85); font-size:2.8vw; font-family:monospace; outline:none; }
+#apiKeyInput::placeholder { color:rgba(100,220,255,0.2); }
+#apiSaveBtn { padding:7px 11px; background:rgba(0,20,35,0.8); border:1.5px solid rgba(100,220,255,0.22); border-radius:8px; color:rgba(100,220,255,0.75); font-size:2.8vw; cursor:pointer; white-space:nowrap; }
+#apiStatus  { font-size:2.5vw; padding:4px 10px; border-radius:6px; display:none; }
+#apiStatus.ok  { color:rgba(0,255,150,0.9); border:1px solid rgba(0,255,150,0.3); background:rgba(0,255,150,0.05); }
+#apiStatus.err { color:rgba(255,100,100,0.9); border:1px solid rgba(255,100,100,0.3); background:rgba(255,80,80,0.05); }
+#voiceSelect { flex:1; background:rgba(0,10,20,0.85); border:1.5px solid rgba(100,220,255,0.18); border-radius:8px; padding:7px 10px; color:rgba(100,220,255,0.85); font-size:2.6vw; font-family:monospace; outline:none; cursor:pointer; }
+#voiceTestBtn { padding:7px 11px; background:rgba(0,20,35,0.8); border:1.5px solid rgba(100,220,255,0.22); border-radius:8px; color:rgba(100,220,255,0.75); font-size:2.6vw; cursor:pointer; white-space:nowrap; }
+#voiceSpeedSlider { flex:1; accent-color:rgba(100,220,255,0.8); cursor:pointer; }
+#voiceSpeedVal    { color:rgba(100,220,255,0.55); font-size:2.4vw; min-width:7vw; text-align:right; }
+.menu-btn { padding:10px; background:rgba(0,20,35,0.8); border:1.5px solid rgba(100,220,255,0.18); border-radius:10px; color:rgba(100,220,255,0.75); font-size:2.8vw; cursor:pointer; text-align:center; letter-spacing:0.1em; }
+.menu-btn.danger { background:rgba(20,0,0,0.8); border-color:rgba(255,80,80,0.18); color:rgba(255,100,100,0.6); }
+
+/* Popup BT */
+#btOverlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.82); z-index:50; align-items:center; justify-content:center; }
+#btOverlay.open { display:flex; }
+#btPanel { background:#030e18; border:1.5px solid rgba(100,220,255,0.28); border-radius:16px; width:88vw; max-width:420px; padding:20px; }
+#btPanelHeader { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; }
+#btPanelTitle  { color:rgba(100,220,255,0.9); font-size:3.8vw; letter-spacing:0.15em; text-transform:uppercase; }
+#btCloseBtn    { width:9vw; height:9vw; max-width:38px; max-height:38px; border:1.5px solid rgba(100,220,255,0.25); border-radius:50%; color:rgba(100,220,255,0.6); font-size:4vw; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+#btCurrentStatus { display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; margin-bottom:14px; border:1px solid rgba(100,220,255,0.1); background:rgba(100,220,255,0.03); }
+#btDot { width:11px; height:11px; border-radius:50%; background:#333; flex-shrink:0; transition:background 0.4s; }
+#btDot.connected  { background:#00ff96; box-shadow:0 0 8px #00ff96; }
+#btDot.connecting { background:#ffc83c; animation:dotPulse 0.7s ease-in-out infinite; }
+#btDot.error      { background:#ff5050; }
+@keyframes dotPulse { 0%,100%{opacity:1}50%{opacity:0.25} }
+#btStatusText { color:rgba(180,220,255,0.85); font-size:3vw; flex:1; }
+#btDeviceName { color:rgba(100,220,255,0.4); font-size:2.4vw; margin-top:2px; }
+#btActions { display:flex; gap:10px; margin-bottom:14px; }
+.bt-action-btn { flex:1; padding:10px 6px; border-radius:10px; font-size:3vw; text-align:center; cursor:pointer; }
+#btConnectBtn    { background:rgba(100,220,255,0.07); border:1.5px solid rgba(100,220,255,0.35); color:rgba(100,220,255,0.9); }
+#btDisconnectBtn { background:rgba(255,80,80,0.07); border:1.5px solid rgba(255,80,80,0.3); color:rgba(255,120,120,0.8); display:none; }
+.bt-sep  { border:none; border-top:1px solid rgba(100,220,255,0.08); margin:12px 0; }
+#btLog   { max-height:20vh; overflow-y:auto; }
+#btLogTitle { color:rgba(100,220,255,0.3); font-size:2.4vw; letter-spacing:0.12em; text-transform:uppercase; margin-bottom:8px; }
+.bt-log-entry { display:flex; gap:8px; padding:5px 0; border-bottom:1px solid rgba(100,220,255,0.05); font-size:2.5vw; line-height:1.4; }
+.bt-log-time     { color:rgba(100,220,255,0.28); flex-shrink:0; }
+.bt-log-msg      { color:rgba(180,220,255,0.7); }
+.bt-log-msg.ok   { color:rgba(0,255,150,0.85); }
+.bt-log-msg.err  { color:rgba(255,100,100,0.85); }
+.bt-log-msg.warn { color:rgba(255,200,60,0.85); }
+</style>
+</head>
+<body>
+<canvas id="eyeCanvas"></canvas>
+<video id="camVideo" autoplay playsinline muted></video>
+<canvas id="camCanvas"></canvas>
+<div id="statusLbl">en veille</div>
+<div id="memInfo"></div>
+<div id="bubble"></div>
+<div id="menuBtn" onclick="openMenu()">&#9776;</div>
+<div id="micBtn"  onclick="toggleMic()">&#127908;</div>
+<div id="dpadBtn" onclick="openDpad()">&#10010;</div>
+<div id="camBtn"  onclick="toggleCam()">&#128247;</div>
+
+<!-- POPUP DPAD -->
+<div id="dpadOverlay">
+  <div id="dpadPopup">
+    <div id="dpadHeader">
+      <span id="dpadTitle">DIRECTION</span>
+      <div id="dpadClose" onclick="closeDpad()">&#10005;</div>
+    </div>
+    <div id="dpad">
+      <div class="dpad-empty"></div>
+      <div class="dpad-btn" id="btnF" ontouchstart="startCmd('F')" ontouchend="stopCmd('F')" onmousedown="startCmd('F')" onmouseup="stopCmd('F')" onmouseleave="stopCmd('F')">&#9650;</div>
+      <div class="dpad-empty"></div>
+      <div class="dpad-btn" id="btnL" ontouchstart="startCmd('L')" ontouchend="stopCmd('L')" onmousedown="startCmd('L')" onmouseup="stopCmd('L')" onmouseleave="stopCmd('L')">&#9664;</div>
+      <div class="dpad-btn"  id="btnS" onclick="sendStop()">&#9632;</div>
+      <div class="dpad-btn" id="btnR" ontouchstart="startCmd('R')" ontouchend="stopCmd('R')" onmousedown="startCmd('R')" onmouseup="stopCmd('R')" onmouseleave="stopCmd('R')">&#9654;</div>
+      <div class="dpad-empty"></div>
+      <div class="dpad-btn" id="btnB" ontouchstart="startCmd('B')" ontouchend="stopCmd('B')" onmousedown="startCmd('B')" onmouseup="stopCmd('B')" onmouseleave="stopCmd('B')">&#9660;</div>
+      <div class="dpad-empty"></div>
+    </div>
+  </div>
+</div>
+
+<!-- MENU SETTINGS -->
+<div id="menuOverlay">
+  <div id="menuPanel">
+    <div id="menuHeader">
+      <span id="menuTitle">&#9881; Reglages</span>
+      <div id="menuClose" onclick="closeMenu()">&#10005;</div>
+    </div>
+    <hr class="menu-sep">
+    <div class="menu-row">
+      <span class="menu-label">CLE API</span>
+      <input id="apiKeyInput" type="password" placeholder="sk-ant-...">
+      <div id="apiSaveBtn" onclick="saveKey()">&#10003; OK</div>
+    </div>
+    <div id="apiStatus"></div>
+    <hr class="menu-sep">
+    <div class="menu-row">
+      <span class="menu-label">VOIX</span>
+      <select id="voiceSelect" onchange="selectVoice(this.value)"><option value="">Auto</option></select>
+      <div id="voiceTestBtn" onclick="testVoice()">&#9654; Test</div>
+    </div>
+    <div class="menu-row">
+      <span class="menu-label">DEBIT</span>
+      <input id="voiceSpeedSlider" type="range" min="0.6" max="1.4" step="0.05" value="0.95" oninput="updateSpeed(this.value)">
+      <span id="voiceSpeedVal">0.95</span>
+    </div>
+    <hr class="menu-sep">
+    <div class="menu-btn" id="btMenuBtn" onclick="closeMenu(); setTimeout(openBtPanel,200)">&#9889; Bluetooth</div>
+    <div class="menu-btn" onclick="showPersons()">&#128100; Personnes connues</div>
+    <div class="menu-btn danger" onclick="confirmClearMemory()">&#128465; Effacer la memoire</div>
+  </div>
+</div>
+
+<!-- POPUP BLUETOOTH -->
+<div id="btOverlay">
+  <div id="btPanel">
+    <div id="btPanelHeader">
+      <div id="btPanelTitle">&#9889; Bluetooth</div>
+      <div id="btCloseBtn" onclick="closeBtPanel()">&#10005;</div>
+    </div>
+    <div id="btCurrentStatus">
+      <div id="btDot"></div>
+      <div><div id="btStatusText">Non connecte</div><div id="btDeviceName"></div></div>
+    </div>
+    <div id="btActions">
+      <div class="bt-action-btn" id="btConnectBtn" onclick="btConnect()">&#128268; Selectionner</div>
+      <div class="bt-action-btn" id="btDisconnectBtn" onclick="btDisconnect()">&#10006; Deconnecter</div>
+    </div>
+    <hr class="bt-sep">
+    <div id="btLog"><div id="btLogTitle">Journal</div><div id="btLogEntries"></div></div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════
+//  YEUX NÉON
+// ══════════════════════════════════════════════════════
+var canvas = document.getElementById('eyeCanvas');
+var ctx    = canvas.getContext('2d');
+
+function resizeCanvas() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
+
+function geom() {
+  var H = canvas.height, W = canvas.width;
+  var OB = H*0.32, OA = OB*0.68, IR = OA*0.60, IDY = OB-IR-OB*0.06;
+  var GN = W*0.28, MX = OA-IR-2;
+  return { OA:OA, OB:OB, IR:IR, IDY:IDY, GN:GN, GF:GN*0.70, GB:GN*1.35, MX:MX };
+}
+
+var NEON = {
+  idle:   [100,220,255], fwd:   [80,255,180], back:  [100,160,255],
+  turn:   [80,255,180],  listen:[0,255,160],  think: [255,200,60],
+  speak:  [255,255,200], vision:[255,160,60], error: [255,80,80]
+};
+var neonC=[100,220,255], neonT=[100,220,255];
+var g=geom(), gap=g.GN, gapT=g.GN;
+var gX=0,gY=0,gXT=0,gYT=0,tilt=0,tiltT=0;
+var blinkT=0,blinkD=0,nextBlink=3.5,pulseT=0,curCmd=null;
+
+function lerp(a,b,t){ return a+(b-a)*t; }
+function clamp(v,mn,mx){ return Math.max(mn,Math.min(mx,v)); }
+
+function neonShape(fn,r,g2,b,lw){
+  var layers=[[12,0.06,9],[5,0.16,4],[2,0.42,2],[0,0.95,1]];
+  for(var i=0;i<layers.length;i++){
+    var L=layers[i];
+    ctx.save();
+    ctx.strokeStyle='rgba('+r+','+g2+','+b+','+L[1]+')';
+    ctx.lineWidth=lw*L[2];
+    if(L[0]>0) ctx.filter='blur('+L[0]+'px)';
+    ctx.beginPath(); fn(); ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function drawEye(cx,cy,ex,ey,nr,ng,nb,pulse){
+  var lw=Math.max(4.5,g.OA*0.088);
+  var p=0.85+pulse*0.15;
+  var pr=Math.round(nr*p), pg2=Math.round(ng*p), pb=Math.round(nb*p);
+  neonShape(function(){ ctx.ellipse(cx,cy,g.OA,g.OB,0,0,Math.PI*2); },pr,pg2,pb,lw);
+  neonShape(function(){ ctx.arc(cx+ex,cy+g.IDY+ey,g.IR,0,Math.PI*2); },pr,pg2,pb,lw*0.87);
+}
+
+function triggerBlink(){ if(blinkD!==0) return; blinkD=1; }
+
+var lastT=performance.now();
+function loop(now){
+  var dt=Math.min((now-lastT)/1000,0.05); lastT=now;
+  var sp=1-Math.pow(0.006,dt*5);
+  gap=lerp(gap,gapT,sp); gX=lerp(gX,gXT,sp); gY=lerp(gY,gYT,sp); tilt=lerp(tilt,tiltT,sp);
+  neonC[0]=lerp(neonC[0],neonT[0],sp); neonC[1]=lerp(neonC[1],neonT[1],sp); neonC[2]=lerp(neonC[2],neonT[2],sp);
+  nextBlink-=dt;
+  if(nextBlink<=0){ triggerBlink(); nextBlink=2.5+Math.random()*5; if(Math.random()<0.22) setTimeout(triggerBlink,400); }
+  if(blinkD===1){ blinkT=Math.min(1,blinkT+dt*10); if(blinkT>=1) blinkD=-1; }
+  else if(blinkD===-1){ blinkT=Math.max(0,blinkT-dt*7); if(blinkT<=0) blinkD=0; }
+  pulseT+=dt*1.4;
+  var pulse=(Math.sin(pulseT)+1)/2;
+  var W=canvas.width, H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  var CY=H/2, lx=W/2-gap/2, rx=W/2+gap/2, openF=Math.max(0.001,1-blinkT);
+  ctx.save(); ctx.translate(W/2,CY); ctx.rotate(tilt*Math.PI/180); ctx.translate(-W/2,-CY);
+  ctx.save(); ctx.translate(lx,CY); ctx.scale(1,openF); ctx.translate(-lx,-CY);
+  drawEye(lx,CY,gX,gY,neonC[0],neonC[1],neonC[2],pulse); ctx.restore();
+  ctx.save(); ctx.translate(rx,CY); ctx.scale(1,openF); ctx.translate(-rx,-CY);
+  drawEye(rx,CY,-gX,gY,neonC[0],neonC[1],neonC[2],pulse); ctx.restore();
+  ctx.restore();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ══════════════════════════════════════════════════════
+//  POPUPS
+// ══════════════════════════════════════════════════════
+function openDpad()  { document.getElementById('dpadOverlay').classList.add('open'); }
+function closeDpad() { document.getElementById('dpadOverlay').classList.remove('open'); }
+function openMenu()  { document.getElementById('menuOverlay').classList.add('open'); }
+function closeMenu() { document.getElementById('menuOverlay').classList.remove('open'); }
+document.getElementById('menuOverlay').addEventListener('click', function(e){ if(e.target===document.getElementById('menuOverlay')) closeMenu(); });
+
+// ══════════════════════════════════════════════════════
+//  STATUS / NEON
+// ══════════════════════════════════════════════════════
+function setStatus(t){ document.getElementById('statusLbl').textContent=t; }
+function setNeon(k){ var c=NEON[k]||NEON.idle; neonT[0]=c[0]; neonT[1]=c[1]; neonT[2]=c[2]; }
+function showBubble(t){ document.getElementById('bubble').textContent=t; document.getElementById('bubble').style.display='block'; document.getElementById('statusLbl').style.display='none'; }
+function hideBubble(){ document.getElementById('bubble').style.display='none'; document.getElementById('statusLbl').style.display='block'; }
+
+// ══════════════════════════════════════════════════════
+//  COMMANDES MOUVEMENT
+// ══════════════════════════════════════════════════════
+var VOICE_MOVE = {
+  'avance':'F','en avant':'F','vas en avant':'F',
+  'recule':'B','en arriere':'B','vas en arriere':'B',
+  'gauche':'L','a gauche':'L','tourne a gauche':'L',
+  'droite':'R','a droite':'R','tourne a droite':'R',
+  'stop':'S','arrete':'S','stoppe':'S'
+};
+
+function startCmd(cmd){
+  curCmd=cmd; g=geom();
+  document.querySelectorAll('.dpad-btn').forEach(function(b){ b.classList.remove('active'); });
+  var map={F:'btnF',B:'btnB',L:'btnL',R:'btnR'};
+  if(map[cmd]) document.getElementById(map[cmd]).classList.add('active');
+  if(cmd==='F'){ gapT=g.GF; gXT=0; gYT=-4; tiltT=0; setNeon('fwd'); setStatus('avance...'); }
+  else if(cmd==='B'){ gapT=g.GB; gXT=0; gYT=3; tiltT=0; setNeon('back'); setStatus('recule...'); }
+  else if(cmd==='L'){ gapT=g.GN*0.90; gXT=-g.MX*0.85; gYT=0; tiltT=-8; setNeon('turn'); setStatus('gauche...'); }
+  else if(cmd==='R'){ gapT=g.GN*0.90; gXT=g.MX*0.85; gYT=0; tiltT=8; setNeon('turn'); setStatus('droite...'); }
+  btSend(cmd); hideBubble();
+}
+function stopCmd(cmd){
+  if(curCmd!==cmd) return;
+  curCmd=null; resetTargets();
+  document.querySelectorAll('.dpad-btn').forEach(function(b){ b.classList.remove('active'); });
+  setStatus('en veille'); btSend('S');
+}
+function sendStop(){
+  curCmd=null; resetTargets();
+  document.querySelectorAll('.dpad-btn').forEach(function(b){ b.classList.remove('active'); });
+  btSend('S'); setStatus('stop');
+  setTimeout(function(){ if(!curCmd) setStatus('en veille'); }, 800);
+}
+function resetTargets(){ g=geom(); gapT=g.GN; gXT=0; gYT=0; tiltT=0; setNeon('idle'); }
+
+// ══════════════════════════════════════════════════════
+//  CLÉ API
+// ══════════════════════════════════════════════════════
+var apiKey = localStorage.getItem('robo_api') || '';
+if(apiKey) document.getElementById('apiKeyInput').value = apiKey;
+
+function saveKey(){
+  var val = document.getElementById('apiKeyInput').value.trim();
+  var s   = document.getElementById('apiStatus');
+  if(!val.startsWith('sk-ant-') || val.length < 20){
+    s.textContent='Cle invalide — doit commencer par sk-ant-'; s.className='err'; s.style.display='block';
+    setTimeout(function(){ s.style.display='none'; }, 3000); return;
+  }
+  apiKey=val; localStorage.setItem('robo_api',apiKey);
+  s.textContent='Cle sauvegardee et active !'; s.className='ok'; s.style.display='block';
+  setTimeout(function(){ s.style.display='none'; }, 3000);
+}
+
+// ══════════════════════════════════════════════════════
+//  VOIX
+// ══════════════════════════════════════════════════════
+var selectedVoiceName = localStorage.getItem('robo_voice') || '';
+var selectedSpeed     = parseFloat(localStorage.getItem('robo_speed') || '0.95');
+var isSpeaking        = false;
+
+function populateVoiceSelect(){
+  var sel    = document.getElementById('voiceSelect');
+  var voices = window.speechSynthesis.getVoices();
+  if(!voices.length) return;
+  sel.innerHTML = '<option value="">Auto (meilleure voix fr)</option>';
+  voices.forEach(function(v){
+    var opt = document.createElement('option');
+    opt.value = v.name;
+    opt.textContent = v.name + ' (' + v.lang + ')' + (v.localService ? ' local' : ' en ligne');
+    sel.appendChild(opt);
+  });
+  sel.value = selectedVoiceName;
+  document.getElementById('voiceSpeedSlider').value = selectedSpeed;
+  document.getElementById('voiceSpeedVal').textContent = selectedSpeed.toFixed(2);
+}
+function selectVoice(n){ selectedVoiceName=n; localStorage.setItem('robo_voice',n); }
+function updateSpeed(v){ selectedSpeed=parseFloat(v); localStorage.setItem('robo_speed',v); document.getElementById('voiceSpeedVal').textContent=parseFloat(v).toFixed(2); }
+function testVoice(){ speak('Bonjour, je suis RoboEyes, votre robot explorateur !', null); }
+
+function getChosenVoice(){
+  var voices = window.speechSynthesis.getVoices();
+  if(selectedVoiceName){ var f=voices.find(function(v){ return v.name===selectedVoiceName; }); if(f) return f; }
+  // Cherche par nom exact puis par langue
+  var pref=['Thomas','Amelie','Google français','Google français','fr-FR-language'];
+  for(var i=0;i<pref.length;i++){
+    var found=voices.find(function(x){ return x.name.includes(pref[i]); });
+    if(found) return found;
+  }
+  // Prend n'importe quelle voix française locale d'abord, sinon en ligne
+  var frLocal=voices.filter(function(v){ return v.lang.startsWith('fr') && v.localService; });
+  if(frLocal.length) return frLocal[0];
+  var frAny=voices.filter(function(v){ return v.lang.startsWith('fr'); });
+  return frAny.length ? frAny[0] : null;
+}
+
+function cleanText(text){
+  return text
+    .replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*/g,'$1')
+    .replace(/`(.*?)`/g,'$1').replace(/#{1,6}\s/g,'')
+    .replace(/[-•]\s/g,'').replace(/\n+/g,'. ')
+    .replace(/[\u{1F000}-\u{1FFFF}]/gu,'').replace(/[\u{2600}-\u{27BF}]/gu,'')
+    .replace(/[☰⚡✓✗▲▼◀▶■✚⊕]/g,'').replace(/\s+/g,' ').trim();
+}
+
+function resumeMic(){
+  isSpeaking = false;
+  if(isListening){ try{ recognition.start(); }catch(e){} }
+}
+
+function speak(text, onEnd){
+  if(!window.speechSynthesis){ if(onEnd) onEnd(); return; }
+  window.speechSynthesis.cancel();
+  var clean = cleanText(text);
+  if(!clean){ if(onEnd) onEnd(); return; }
+
+  isSpeaking = true;
+
+  // Timeout de securite — si onend ne se declenche pas, on reprend quand meme
+  var safetyTimer = setTimeout(function(){
+    resumeMic();
+    if(onEnd) onEnd();
+  }, Math.max(4000, clean.length * 80));
+
+  var voices = window.speechSynthesis.getVoices();
+  // Si pas de voix chargees, attend et reessaie
+  if(!voices.length){
+    window.speechSynthesis.onvoiceschanged = function(){
+      window.speechSynthesis.onvoiceschanged = null;
+      speak(text, onEnd);
+    };
+    return;
+  }
+
+  var utt = new SpeechSynthesisUtterance(clean);
+  utt.lang='fr-FR'; utt.rate=selectedSpeed; utt.pitch=1.0; utt.volume=1.0;
+  var v = getChosenVoice(); if(v) utt.voice=v;
+
+  utt.onstart = function(){
+    clearTimeout(safetyTimer);
+    // Nouveau timeout base sur la duree reelle
+    safetyTimer = setTimeout(function(){ resumeMic(); if(onEnd) onEnd(); }, Math.max(5000, clean.length*90));
+  };
+  utt.onend = function(){
+    clearTimeout(safetyTimer);
+    setTimeout(function(){ resumeMic(); if(onEnd) onEnd(); }, 700);
+  };
+  utt.onerror = function(e){
+    clearTimeout(safetyTimer);
+    console.warn('TTS error:', e.error);
+    resumeMic();
+    if(onEnd) onEnd();
+  };
+  window.speechSynthesis.speak(utt);
+}
+window.speechSynthesis.onvoiceschanged = function(){ window.speechSynthesis.getVoices(); populateVoiceSelect(); };
+
+// ══════════════════════════════════════════════════════
+//  RECONNAISSANCE VOCALE
+// ══════════════════════════════════════════════════════
+var recognition=null, isListening=false;
+
+function initRecognition(){
+  if(!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) return;
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SR();
+  recognition.lang='fr-FR'; recognition.continuous=true; recognition.interimResults=false; recognition.maxAlternatives=1;
+  recognition.onstart  = function(){ setStatus('ecoute...'); setNeon('listen'); };
+  recognition.onresult = function(e){
+    if(isSpeaking) return;
+    var result = e.results[e.results.length-1];
+    if(!result.isFinal) return;
+    var txt = result[0].transcript.trim().toLowerCase();
+    console.log('[STT recu]', txt);
+    if(!txt || txt.length < 2) return;
+
+    // Detection commandes — cherche dans le texte brut
+    var moved = false;
+    var cmds = {
+      'avance':'F','en avant':'F',
+      'recule':'B','en arriere':'B','recules':'B',
+      'gauche':'L','a gauche':'L','tourne gauche':'L',
+      'droite':'R','a droite':'R','tourne droite':'R',
+      'stop':'S','arrete':'S','stoppe':'S'
+    };
+    // Normalise sans accents pour comparaison
+    var norm = txt.normalize('NFD').replace(/[̀-ͯ]/g,'');
+    for(var kw in cmds){
+      if(norm.includes(kw)){ startCmd(cmds[kw]); setTimeout(function(){ stopCmd(curCmd); },1500); moved=true; break; }
+    }
+    if(!moved) askClaude(txt, needsVision(txt));
+  };
+  recognition.onerror = function(e){
+    if(e.error==='no-speech' || e.error==='aborted') return;
+    if(e.error==='not-allowed'){ setStatus('micro refuse'); isListening=false; document.getElementById('micBtn').classList.remove('listening'); return; }
+    if(isListening) setTimeout(function(){ try{ recognition.start(); }catch(err){} },1000);
+  };
+  recognition.onend = function(){
+    if(isListening && !isSpeaking) setTimeout(function(){ try{ recognition.start(); }catch(err){} },300);
+    else if(!isListening){ setNeon('idle'); setStatus('en veille'); }
+  };
+}
+function toggleMic(){ if(!recognition) initRecognition(); if(!recognition) return; isListening ? stopListening() : startListening(); }
+function startListening(){ isListening=true; document.getElementById('micBtn').classList.add('listening'); try{ recognition.start(); }catch(e){} }
+function stopListening(){ isListening=false; document.getElementById('micBtn').classList.remove('listening'); try{ recognition.stop(); }catch(e){} setNeon('idle'); setStatus('en veille'); }
+
+// ══════════════════════════════════════════════════════
+//  CAMÉRA + VISION CONTINUE
+// ══════════════════════════════════════════════════════
+var camStream=null, camActive=false;
+var camVideo=document.getElementById('camVideo'), camCanvas=document.getElementById('camCanvas');
+var visionTimer=null, lastPixels=null, visionCooldown=false, lastReactionTime=0;
+var MOTION_MS=1500, REACT_GAP=22000, MOTION_THR=22, MOTION_PCT=0.05;
+
+function toggleCam(){ camActive ? stopCam() : startCam(); }
+
+function startCam(){
+  navigator.mediaDevices.getUserMedia({ video:{facingMode:'environment',width:320,height:240}, audio:false })
+  .then(function(stream){
+    camStream=stream; camVideo.srcObject=stream; camActive=true;
+    document.getElementById('camBtn').classList.add('active');
+    setStatus('camera active'); setTimeout(function(){ setStatus('en veille'); },1500);
+    startVisionLoop();
+  })
+  .catch(function(){ setStatus('camera refusee'); setTimeout(function(){ setStatus('en veille'); },2000); });
+}
+
+function stopCam(){
+  stopVisionLoop();
+  if(camStream) camStream.getTracks().forEach(function(t){ t.stop(); });
+  camVideo.srcObject=null; camStream=null; camActive=false; lastPixels=null;
+  document.getElementById('camBtn').classList.remove('active');
+}
+
+function captureSmall(){
+  var W=80,H=60; camCanvas.width=W; camCanvas.height=H;
+  camCanvas.getContext('2d').drawImage(camVideo,0,0,W,H);
+  return camCanvas.getContext('2d').getImageData(0,0,W,H).data;
+}
+
+function captureFrame(){
+  if(!camActive||!camStream) return null;
+  camCanvas.width=640; camCanvas.height=480;
+  camCanvas.getContext('2d').drawImage(camVideo,0,0,640,480);
+  return camCanvas.toDataURL('image/jpeg',0.82).split(',')[1];
+}
+
+function motionLevel(prev,curr){
+  if(!prev||!curr) return 0;
+  var changed=0;
+  for(var i=0;i<curr.length;i+=4){
+    var d=(Math.abs(curr[i]-prev[i])+Math.abs(curr[i+1]-prev[i+1])+Math.abs(curr[i+2]-prev[i+2]))/3;
+    if(d>MOTION_THR) changed++;
+  }
+  return changed/(curr.length/4);
+}
+
+function startVisionLoop(){
+  if(visionTimer) clearInterval(visionTimer);
+  visionTimer = setInterval(function(){
+    if(!camActive || isSpeaking || visionCooldown || !apiKey) return;
+    var pixels = captureSmall();
+    var motion = motionLevel(lastPixels, pixels);
+    lastPixels = pixels;
+    if(motion < MOTION_PCT) return;
+    var now = Date.now();
+    if(now - lastReactionTime < REACT_GAP) return;
+    visionCooldown=true; lastReactionTime=now;
+    reactToScene();
+    setTimeout(function(){ visionCooldown=false; }, 4000);
+  }, MOTION_MS);
+}
+
+function stopVisionLoop(){ if(visionTimer){ clearInterval(visionTimer); visionTimer=null; } }
+
+function reactToScene(){
+  var frame = captureFrame();
+  if(!frame) return;
+  var persons = loadPersons();
+  var names   = Object.keys(persons);
+  var knownList = names.length ? names.map(function(n){ return n+': '+persons[n].description; }).join('; ') : '';
+
+  // Prompt simple sans JSON multiligne pour éviter les bugs de parsing
+  var promptParts = ['Tu es RoboEyes, un robot curieux et espiegle.'];
+  promptParts.push('Analyse cette image et reponds en JSON sur UNE SEULE LIGNE.');
+  promptParts.push('Format exact: {"s":"vide","n":null,"r":null}');
+  promptParts.push('s = vide|connu|inconnu|autre');
+  promptParts.push('n = prenom si reconnu sinon null');
+  promptParts.push('r = reaction en une phrase naturelle sans emojis, ou null si scene vide');
+  if(knownList) promptParts.push('Personnes connues: ' + knownList);
+  promptParts.push('Si vide: s=vide, r=null.');
+  promptParts.push('IMPORTANT: Si tu reconnais quelquun des personnes connues, mets s=connu et JAMAIS s=inconnu pour cette personne.');
+  promptParts.push('Si connu: s=connu, n=son prenom exact, salue-le chaleureusement, demande comment il va, parle-lui.');
+  promptParts.push('Si inconnu (personne non listee): s=inconnu, interpelle-le, demande poliment son nom et ce quil fait.');
+  promptParts.push('Ne pose JAMAIS la meme question deux fois de suite.');
+  promptParts.push('Si autre chose interessant: s=autre, commente.');
+  var prompt = promptParts.join(' ');
+
+  fetch('https://api.anthropic.com/v1/messages', {
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body: JSON.stringify({
+      model:'claude-sonnet-4-20250514', max_tokens:100,
+      messages:[{role:'user', content:[
+        {type:'image', source:{type:'base64', media_type:'image/jpeg', data:frame}},
+        {type:'text', text:prompt}
+      ]}]
+    })
+  })
+  .then(function(res){ return res.json(); })
+  .then(function(data){
+    var raw = data.content[0].text.trim().replace(/```json|```/g,'').trim();
+    var parsed;
+    try{ parsed=JSON.parse(raw); }catch(e){ return; }
+    var scene=parsed.s, nom=parsed.n, reaction=parsed.r;
+    if(!scene||scene==='vide'||!reaction||reaction.length<4) return;
+    setNeon('vision'); triggerBlink();
+    if(scene==='connu' && nom){
+      var p=loadPersons(); if(p[nom]){ p[nom].lastSeen=new Date().toISOString(); savePersons(p); }
+    }
+    speak(cleanText(reaction), function(){
+      setNeon('idle'); setStatus('en veille');
+      if(scene==='inconnu' && !isListening) setTimeout(function(){ if(!recognition) initRecognition(); startListening(); },500);
+    });
+  })
+  .catch(function(e){ console.warn('reactToScene:', e); });
+}
+
+// ══════════════════════════════════════════════════════
+//  MÉMOIRE PERSONNES
+// ══════════════════════════════════════════════════════
+var PK='robo_persons';
+function loadPersons(){ try{ var r=localStorage.getItem(PK); return r?JSON.parse(r):{}; }catch(e){ return {}; } }
+function savePersons(p){ localStorage.setItem(PK,JSON.stringify(p)); }
+
+function detectIntro(text){
+  var patterns=[
+    /(?:c est|voici|je te presente|appelle.?le|appelle.?la|il s appelle|elle s appelle|son prenom est)\s+(?:\w+\s+)?(\w+)/i,
+    /(?:c'est|voici|je te présente)\s+(?:mon|ma|le|la|mes|son|sa)?\s*(?:\w+\s+)?(\w+)/i
+  ];
+  for(var i=0;i<patterns.length;i++){ var m=text.match(patterns[i]); if(m) return m[1]; }
+  return null;
+}
+
+function memorizePersonFromCamera(prenom){
+  if(!camActive||!apiKey) return;
+  var frame=captureFrame(); if(!frame) return;
+  fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body:JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:150,
+      messages:[{role:'user', content:[
+        {type:'image', source:{type:'base64', media_type:'image/jpeg', data:frame}},
+        {type:'text', text:'Decris physiquement la personne visible: couleur et longueur des cheveux, forme du visage, age approximatif, particularites. 2-3 phrases courtes. Uniquement la description.'}
+      ]}]
+    })
+  })
+  .then(function(r){ return r.json(); })
+  .then(function(d){
+    var desc=d.content[0].text.trim();
+    var p=loadPersons();
+    p[prenom]={description:desc, date:new Date().toLocaleDateString('fr-FR'), lastSeen:new Date().toISOString()};
+    savePersons(p);
+    console.log('Memorise: '+prenom+' - '+desc);
+  }).catch(function(e){ console.warn('memorize:',e); });
+}
+
+function showPersons(){
+  var persons=loadPersons(), names=Object.keys(persons);
+  closeMenu();
+  if(!names.length){ speak('Je ne connais encore personne. Presente-moi quelquun !', null); return; }
+  var list=names.map(function(n){ return n+': '+persons[n].description+' (depuis le '+persons[n].date+')'; }).join('\n');
+  showBubble('Personnes connues:\n'+list);
+  speak('Je connais '+names.length+' personne'+( names.length>1?'s':'')+': '+names.join(', '), null);
+  setTimeout(hideBubble, 8000);
+}
+
+// ══════════════════════════════════════════════════════
+//  MÉMOIRE CONVERSATIONS
+// ══════════════════════════════════════════════════════
+var MK='robo_history';
+function loadHistory(){ try{ var r=localStorage.getItem(MK); return r?JSON.parse(r):[]; }catch(e){ return []; } }
+function saveHistory(h){ try{ localStorage.setItem(MK,JSON.stringify(h)); updateMemInfo(h); }catch(e){ if(h.length>40){ h=h.slice(20); localStorage.setItem(MK,JSON.stringify(h)); } } }
+function updateMemInfo(h){ var c=Math.floor(h.length/2); document.getElementById('memInfo').textContent=c>0?c+' echanges':''; }
+function confirmClearMemory(){
+  var btn=document.getElementById('clearMemBtn')||document.querySelector('.menu-btn.danger');
+  var orig=btn.textContent;
+  btn.textContent='Confirmer ?';
+  btn.onclick=function(){ clearMemory(); btn.textContent=orig; btn.onclick=confirmClearMemory; closeMenu(); };
+  setTimeout(function(){ btn.textContent=orig; btn.onclick=confirmClearMemory; },4000);
+}
+function clearMemory(){
+  localStorage.removeItem(MK); localStorage.removeItem(PK);
+  conversationHistory=[]; updateMemInfo([]);
+  speak('Ma memoire a ete effacee. Je repars de zero.', null);
+}
+var conversationHistory=loadHistory(); updateMemInfo(conversationHistory);
+
+// ══════════════════════════════════════════════════════
+//  CLAUDE API
+// ══════════════════════════════════════════════════════
+var VISION_KW=['que vois-tu','ce que tu vois','decris','regarde','vois-tu','reconnais','quel objet','c est quoi','qui est-ce','qui suis-je','tu me vois','montre','devant toi','autour de toi','photo','image','qui est la'];
+function needsVision(t){ var norm=t.normalize('NFD').replace(/[\u0300-\u036f]/g,''); return camActive && VISION_KW.some(function(k){ return norm.includes(k)||t.includes(k); }); }
+
+function buildSystem(){
+  var persons=loadPersons(), names=Object.keys(persons);
+  var pStr=names.length ? 'Personnes que tu connais: '+names.map(function(n){ return n+' ('+persons[n].description+')'; }).join(', ')+'.' : '';
+  return 'Tu es RoboEyes, IA embarquee dans un robot a chenilles. Tu reponds en francais, concis (2-3 phrases). Tu es curieux, chaleureux et espiegle. Pour te deplacer: avance, recule, gauche, droite, stop. Tu as une camera et tu vois en temps reel. Reponds toujours en texte brut sans markdown ni caracteres speciaux — uniquement des phrases naturelles lues a voix haute. Quand on te presente quelquun, memorise-le (le systeme le fait automatiquement). Quand tu vois quelquun connu, salue-le chaleureusement. ' + pStr + ' Date: ' + new Date().toLocaleString('fr-FR') + '.';
+}
+
+function extractAndSavePersons(answer, question){
+  var tag=answer.match(/MEMORISER_PERSONNE\[([^|]+)\|([^\]]+)\]/);
+  if(tag){
+    var prenom=tag[1].trim(), desc=tag[2].trim();
+    var p=loadPersons(); p[prenom]={description:desc,date:new Date().toLocaleDateString('fr-FR'),lastSeen:new Date().toISOString()};
+    savePersons(p);
+    return answer.replace(/MEMORISER_PERSONNE\[[^\]]+\]/g,'').trim();
+  }
+  var introName=detectIntro(question);
+  if(introName && camActive){
+    // Bloque les réactions spontanées pendant 45s après une présentation
+    lastReactionTime = Date.now() + 30000;
+    setTimeout(function(){ memorizePersonFromCamera(introName); },500);
+  }
+  return answer;
+}
+
+function askClaude(question, withVision){
+  if(!apiKey){ speak('Cle API manquante. Ouvre le menu pour la configurer.', null); return; }
+  setNeon(withVision?'vision':'think'); setStatus(withVision?'analyse...':'reflexion...'); triggerBlink();
+  var userContent=question;
+  if(withVision && camActive){
+    var frame=captureFrame();
+    if(frame) userContent=[{type:'image',source:{type:'base64',media_type:'image/jpeg',data:frame}},{type:'text',text:question||'Decris ce que tu vois.'}];
+  }
+  conversationHistory.push({role:'user',content:question,ts:new Date().toISOString()});
+  saveHistory(conversationHistory);
+  var messages=conversationHistory.slice(0,-1).map(function(m){ return {role:m.role,content:m.content}; });
+  messages.push({role:'user',content:userContent});
+  fetch('https://api.anthropic.com/v1/messages',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:400,system:buildSystem(),messages:messages})
+  })
+  .then(function(res){ return res.json(); })
+  .then(function(data){
+    var answer=data.content[0].text;
+    if(data.error) throw new Error(data.error.message);
+    answer=extractAndSavePersons(answer,question);
+    conversationHistory.push({role:'assistant',content:answer,ts:new Date().toISOString()});
+    saveHistory(conversationHistory);
+    setNeon('speak'); setStatus('...');
+    speak(answer, function(){ setNeon('idle'); setStatus('en veille'); });
+  })
+  .catch(function(e){
+    console.warn('Claude API error:', e);
+    setNeon('idle'); setStatus('en veille');
+    isSpeaking = false;
+    if(isListening){ try{ recognition.start(); }catch(err){} }
+  });
+}
+
+// ══════════════════════════════════════════════════════
+//  BLUETOOTH
+// ══════════════════════════════════════════════════════
+var btConnected=false;
+var CMD_MAP={F:'F',B:'B',L:'L',R:'R',S:'S',H:'H',W:'W'};
+
+function btLog(msg,type){
+  var c=document.getElementById('btLogEntries'), now=new Date();
+  var t=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+':'+String(now.getSeconds()).padStart(2,'0');
+  var e=document.createElement('div'); e.className='bt-log-entry';
+  e.innerHTML='<span class="bt-log-time">'+t+'</span><span class="bt-log-msg '+(type||'')+'">'+msg+'</span>';
+  c.insertBefore(e,c.firstChild); while(c.children.length>30) c.removeChild(c.lastChild);
+}
+function btSetState(state,name){
+  var dot=document.getElementById('btDot'),txt=document.getElementById('btStatusText'),dev=document.getElementById('btDeviceName');
+  var cb=document.getElementById('btConnectBtn'),db=document.getElementById('btDisconnectBtn'),mb=document.getElementById('btMenuBtn');
+  dot.className='';
+  if(state==='connected'){ dot.classList.add('connected'); txt.textContent='Connecte'; dev.textContent=name||''; cb.style.display='none'; db.style.display='block'; btConnected=true; if(mb){ mb.style.color='rgba(0,255,150,0.8)'; mb.textContent='Bluetooth - connecte'; } }
+  else if(state==='connecting'){ dot.classList.add('connecting'); txt.textContent='Connexion...'; cb.style.display='none'; db.style.display='none'; }
+  else if(state==='error'){ dot.classList.add('error'); txt.textContent='Erreur'; dev.textContent=name||''; cb.style.display='block'; cb.textContent='Reessayer'; db.style.display='none'; btConnected=false; }
+  else { txt.textContent='Non connecte'; dev.textContent=''; cb.style.display='block'; cb.innerHTML='&#128268; Selectionner'; db.style.display='none'; btConnected=false; if(mb){ mb.style.color=''; mb.textContent='&#9889; Bluetooth'; } }
+}
+function openBtPanel(){ document.getElementById('btOverlay').classList.add('open'); loadPairedDevices(); }
+function closeBtPanel(){ document.getElementById('btOverlay').classList.remove('open'); }
+document.getElementById('btOverlay').addEventListener('click', function(e){ if(e.target===document.getElementById('btOverlay')) closeBtPanel(); });
+
+function loadPairedDevices(){
+  if(!window.AndroidBT){ btLog('Mode navigateur - BT natif non disponible','warn'); return; }
+  try{
+    var devices=JSON.parse(window.AndroidBT.getPairedDevices());
+    if(!devices.length){ btLog('Aucun appareil appaire','warn'); return; }
+    btLog('Appareils appaires:','ok');
+    devices.forEach(function(d){
+      var e=document.createElement('div'); e.className='bt-log-entry'; e.style.cursor='pointer';
+      e.innerHTML='<span class="bt-log-time">&#128268;</span><span class="bt-log-msg" style="color:rgba(100,220,255,0.9)">'+d.name+' — '+d.address+'</span>';
+      e.addEventListener('click', function(){ btConnectTo(d.address,d.name); });
+      document.getElementById('btLogEntries').insertBefore(e,document.getElementById('btLogEntries').firstChild);
+    });
+  }catch(err){ btLog('Erreur: '+err,'err'); }
+}
+function btConnect(){ loadPairedDevices(); }
+function btConnectTo(address,name){
+  if(!window.AndroidBT){ btLog('AndroidBT non disponible','err'); return; }
+  btSetState('connecting'); btLog('Connexion a '+name+'...');
+  window.AndroidBT.connect(address);
+}
+function btDisconnect(){ if(window.AndroidBT) window.AndroidBT.disconnect(); btSetState('disconnected'); btLog('Deconnexion manuelle'); }
+function btSend(cmd){ if(!btConnected||!window.AndroidBT) return; window.AndroidBT.sendCommand(cmd); }
+
+window.btEvent = function(event){
+  if(event.type==='connected'){ btSetState('connected',event.name); btLog('Connecte a "'+event.name+'"','ok'); }
+  else if(event.type==='disconnected'){ btSetState('disconnected'); btLog('Deconnecte','warn'); }
+  else if(event.type==='error'){ btSetState('error',event.message); btLog('Erreur: '+event.message,'err'); }
+};
+
+// ══════════════════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════════════════
+canvas.addEventListener('click', triggerBlink);
+
+window.addEventListener('load', function(){
+  btLog('Application demarree','ok');
+  setTimeout(populateVoiceSelect, 600);
+  var count=Math.floor(conversationHistory.length/2);
+  if(count>0) setTimeout(function(){ speak('Je me souviens de nos '+count+' echanges precedents.',null); },900);
+  setTimeout(function(){ initRecognition(); if(recognition) startListening(); },1200);
+});
+</script>
+</body>
+</html>
