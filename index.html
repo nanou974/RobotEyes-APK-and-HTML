@@ -237,6 +237,11 @@ function speak(text,onEnd){
     setTimeout(function(){speak(text,onEnd);},300);
     return;
   }
+  // Si l'audio n'est pas encore débloqué, on attend le premier tap
+  if(!audioUnlocked){
+    window._pendingSpeak = {text:text, onEnd:onEnd};
+    return;
+  }
 
   isSpeaking=true;
   var utt=new SpeechSynthesisUtterance(clean);
@@ -555,13 +560,34 @@ function btSend(cmd){if(!btConnected||!window.AndroidBT)return;window.AndroidBT.
 window.btEvent=function(ev){if(ev.type==='connected'){btSetState('connected',ev.name);btLog('Connecte a "'+ev.name+'"','ok');}else if(ev.type==='disconnected'){btSetState('disconnected');btLog('Deconnecte','warn');}else if(ev.type==='error'){btSetState('error',ev.message);btLog('Erreur: '+ev.message,'err');}};
 
 // ── INIT ──────────────────────────────────────────────
-canvas.addEventListener('click',function(){
-  triggerBlink();
-  if(window._welcomeMsg){
-    speak(window._welcomeMsg, null);
-    window._welcomeMsg = null;
-  }
-});
+var audioUnlocked = false;
+
+function unlockAudio(){
+  if(audioUnlocked) return;
+  audioUnlocked = true;
+  // Débloque speechSynthesis avec un utterance vide
+  var utt = new SpeechSynthesisUtterance('');
+  utt.volume = 0;
+  window.speechSynthesis.speak(utt);
+  // Joue le message de bienvenue si présent
+  setTimeout(function(){
+    if(window._welcomeMsg){
+      speak(window._welcomeMsg, null);
+      window._welcomeMsg = null;
+    }
+    if(window._pendingSpeak){
+      var ps = window._pendingSpeak;
+      window._pendingSpeak = null;
+      speak(ps.text, ps.onEnd);
+    }
+  }, 200);
+}
+
+// Débloque au premier tap n'importe où sur la page
+document.addEventListener('touchstart', unlockAudio, {once:true});
+document.addEventListener('click', unlockAudio, {once:true});
+
+canvas.addEventListener('click', triggerBlink);
 window.addEventListener('load',function(){
   // Précharge les voix
   window.speechSynthesis.getVoices();
