@@ -259,7 +259,12 @@ function speak(text,onEnd){
   utt.onend=function(){
     if(done)return;done=true;
     clearTimeout(safety);
-    setTimeout(function(){isSpeaking=false;if(onEnd)onEnd();},600);
+    // Délai généreux pour que les hauts-parleurs s'éteignent
+    // avant de rallumer le micro (évite que le robot s'entende)
+    setTimeout(function(){
+      isSpeaking=false;
+      if(onEnd)onEnd();
+    },1800);
   };
   utt.onerror=function(e){
     if(done)return;done=true;
@@ -309,6 +314,8 @@ function initSTT(){
     }
     txt=txt.trim();
     if(!txt){restartSTT();return;}
+    // Ignore si le robot est en train de parler
+    if(isSpeaking){restartSTT();return;}
     var n=norm(txt);
     console.log('[STT]',txt);
 
@@ -350,9 +357,15 @@ function restartSTT(){
   if(!isListening||isSpeaking||sttRestarting)return;
   sttRestarting=true;
   setTimeout(function(){
-    if(!isListening||isSpeaking){sttRestarting=false;return;}
+    // Double-vérification — si le robot parle encore on reporte
+    if(!isListening||isSpeaking){
+      sttRestarting=false;
+      // Réessaie dans 1 seconde
+      setTimeout(restartSTT,1000);
+      return;
+    }
     try{recognition.start();}catch(e){sttRestarting=false;}
-  },400);
+  },600);
 }
 
 function toggleMic(){
